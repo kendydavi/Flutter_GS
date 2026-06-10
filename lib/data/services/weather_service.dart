@@ -1,13 +1,20 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import '../../domain/models/weather_model.dart';
 
 /// Serviço de dados agrometeorológicos via NASA POWER API.
 /// Documentação: https://power.larc.nasa.gov/docs/services/api/
 class WeatherService {
-  static const String _baseUrl = 'https://power.larc.nasa.gov/api/temporal/daily/point';
+  static const String _baseUrl =
+      'https://power.larc.nasa.gov/api/temporal/daily/point';
 
-  /// Busca os dados climáticos dos últimos 7 dias para as coordenadas informadas.
+  // No web, o navegador bloqueia chamadas cross-origin (CORS).
+  // O corsproxy.io atua como intermediário e adiciona os headers necessários.
+  static const String _corsProxy = 'https://corsproxy.io/?';
+
+  /// Busca os dados climáticos dos últimos 30 dias para as coordenadas informadas.
+  /// Janela de 30 dias garante dados válidos mesmo com o lag típico de 5+ dias da API.
   /// Parâmetros solicitados:
   /// - T2M_MAX / T2M_MIN: temperatura máx e mín a 2m
   /// - PRECTOTCORR: precipitação corrigida
@@ -16,11 +23,11 @@ class WeatherService {
   Future<WeatherModel> getWeather(double latitude, double longitude) async {
     final now = DateTime.now();
     final end = _formatDate(now);
-    final start = _formatDate(now.subtract(const Duration(days: 7)));
+    final start = _formatDate(now.subtract(const Duration(days: 30)));
 
-    final uri = Uri.parse(_baseUrl).replace(queryParameters: {
+    final nasaUri = Uri.parse(_baseUrl).replace(queryParameters: {
       'parameters': 'T2M_MAX,T2M_MIN,PRECTOTCORR,RH2M,ALLSKY_SFC_SW_DWN',
-      'community': 'AG', // comunidade agrícola
+      'community': 'AG',
       'longitude': longitude.toString(),
       'latitude': latitude.toString(),
       'start': start,
@@ -28,7 +35,12 @@ class WeatherService {
       'format': 'JSON',
     });
 
-    final response = await http.get(uri).timeout(const Duration(seconds: 15));
+    // No web usa proxy CORS; em mobile/desktop chama a API diretamente.
+    final uri = kIsWeb
+        ? Uri.parse('$_corsProxy${Uri.encodeComponent(nasaUri.toString())}')
+        : nasaUri;
+
+    final response = await http.get(uri).timeout(const Duration(seconds: 20));
 
     if (response.statusCode == 200) {
       final json = jsonDecode(response.body) as Map<String, dynamic>;

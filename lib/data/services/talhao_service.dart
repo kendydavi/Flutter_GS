@@ -8,15 +8,20 @@ class TalhaoService {
   TalhaoService(this._firestore);
 
   /// Stream em tempo real de todos os talhões do usuário autenticado.
+  /// Ordenação feita no Dart para evitar necessidade de índice composto no Firestore.
   Stream<List<TalhaoModel>> getTalhoesStream(String userId) {
     return _firestore
         .collection(_collection)
         .where('userId', isEqualTo: userId)
-        .orderBy('dataCadastro', descending: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => TalhaoModel.fromJson({...doc.data(), 'id': doc.id}))
-            .toList());
+        .map((snapshot) {
+          final talhoes = snapshot.docs
+              .map((doc) => TalhaoModel.fromJson({...doc.data(), 'id': doc.id}))
+              .toList();
+          talhoes.sort((a, b) =>
+              (b.dataCadastro ?? '').compareTo(a.dataCadastro ?? ''));
+          return talhoes;
+        });
   }
 
   /// Adiciona um novo talhão vinculado ao userId.

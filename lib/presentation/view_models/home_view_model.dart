@@ -26,12 +26,12 @@ class HomeViewModel extends ChangeNotifier {
   String? _weatherError;
   String? get weatherError => _weatherError;
 
-  // --- Stream de talhões ---
   String? get _userId => _firebaseAuth.currentUser?.uid;
 
-  Stream<List<TalhaoModel>> get talhoesStream {
-    final uid = _userId;
-    if (uid == null) return Stream.value([]);
+  /// Retorna stream de talhões para um UID específico.
+  /// Chamado pela HomeScreen após o Firebase Auth confirmar o usuário,
+  /// garantindo que o UID nunca seja nulo no momento da consulta.
+  Stream<List<TalhaoModel>> talhoesStreamForUser(String uid) {
     return _talhaoRepository.getTalhoesStream(uid);
   }
 

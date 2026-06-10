@@ -10,27 +10,29 @@ import 'widgets/talhao_card.dart';
 import 'widgets/loading_indicator.dart';
 
 /// Tela principal — listagem em tempo real dos talhões do usuário.
+///
+/// Usa dois StreamBuilders aninhados:
+/// 1. Externo: aguarda o Firebase Auth restaurar a sessão (inclusive após refresh no web)
+/// 2. Interno: só cria o stream do Firestore quando o UID está garantido
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
-  void _gotoLogin(BuildContext context) {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-    );
-  }
-
-  Future<void> _confirmDelete(BuildContext context, HomeViewModel viewModel, TalhaoModel talhao) async {
+  Future<void> _confirmDelete(
+      BuildContext context, HomeViewModel viewModel, TalhaoModel talhao) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Excluir talhão'),
-        content: Text('Deseja excluir "${talhao.nome}"? Esta ação não pode ser desfeita.'),
+        content: Text(
+            'Deseja excluir "${talhao.nome}"? Esta ação não pode ser desfeita.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar')),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Excluir', style: TextStyle(color: Colors.red)),
+            child:
+                const Text('Excluir', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -64,74 +66,107 @@ class HomeScreen extends StatelessWidget {
             tooltip: 'Sair',
             onPressed: () async {
               await FirebaseAuth.instance.signOut();
-              if (context.mounted) _gotoLogin(context);
+              if (context.mounted) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                );
+              }
             },
           ),
         ],
       ),
-      body: StreamBuilder<List<TalhaoModel>>(
-        stream: viewModel.talhoesStream,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const LoadingIndicator(message: 'Carregando talhões...');
+
+      // StreamBuilder externo: aguarda o Firebase Auth confirmar o usuário.
+      // Isso resolve o problema de refresh no web, onde a sessão é restaurada
+      // de forma assíncrona e o UID só fica disponível após alguns instantes.
+      body: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, authSnapshot) {
+          if (authSnapshot.connectionState == ConnectionState.waiting) {
+            return const LoadingIndicator(message: 'Verificando sessão...');
           }
 
-          if (snapshot.hasError) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.error_outline, color: Colors.red, size: 48),
-                  const SizedBox(height: 12),
-                  Text('Erro ao carregar dados:\n${snapshot.error}',
-                      textAlign: TextAlign.center),
-                ],
-              ),
-            );
+          // Usuário não autenticado — AuthGate já trata isso, mas por segurança:
+          if (!authSnapshot.hasData || authSnapshot.data == null) {
+            return const LoadingIndicator(message: 'Carregando...');
           }
 
-          final talhoes = snapshot.data ?? [];
+          final uid = authSnapshot.data!.uid;
 
-          if (talhoes.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.terrain, size: 64, color: Colors.grey[400]),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Nenhum talhão cadastrado.',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 16),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Toque em + para adicionar o primeiro.',
-                    style: TextStyle(color: Colors.grey[500], fontSize: 14),
-                  ),
-                ],
-              ),
-            );
-          }
+          // StreamBuilder interno: cria o stream do Firestore com o UID confirmado.
+          return StreamBuilder<List<TalhaoModel>>(
+            stream: viewModel.talhoesStreamForUser(uid),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const LoadingIndicator(message: 'Carregando talhões...');
+              }
 
-          return ListView.builder(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: talhoes.length,
-            itemBuilder: (context, index) {
-              final talhao = talhoes[index];
-              return TalhaoCard(
-                talhao: talhao,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => TalhaoDetailScreen(talhao: talhao),
+              if (snapshot.hasError) {
+                return Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.error_outline,
+                          color: Colors.red, size: 48),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Erro ao carregar dados:\n${snapshot.error}',
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
                   ),
-                ),
-                onDelete: () => _confirmDelete(context, viewModel, talhao),
+                );
+              }
+
+              final talhoes = snapshot.data ?? [];
+
+              if (talhoes.isEmpty) {
+                return Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.terrain, size: 64, color: Colors.grey[400]),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Nenhum talhão cadastrado.',
+                        style:
+                            TextStyle(color: Colors.grey[600], fontSize: 16),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Toque em + para adicionar o primeiro.',
+                        style:
+                            TextStyle(color: Colors.grey[500], fontSize: 14),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return ListView.builder(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                itemCount: talhoes.length,
+                itemBuilder: (context, index) {
+                  final talhao = talhoes[index];
+                  return TalhaoCard(
+                    talhao: talhao,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => TalhaoDetailScreen(talhao: talhao),
+                      ),
+                    ),
+                    onDelete: () =>
+                        _confirmDelete(context, viewModel, talhao),
+                  );
+                },
               );
             },
           );
         },
       ),
+
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => Navigator.push(
           context,
